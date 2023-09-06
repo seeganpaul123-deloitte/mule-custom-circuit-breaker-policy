@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:http-policy="http://www.mulesoft.org/schema/mule/http-policy"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd http://www.mulesoft.org/schema/mule/core
+http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http
+http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/http-policy
+http://www.mulesoft.org/schema/mule/http-policy/current/mule-http-policy.xsd
+http://www.mulesoft.org/schema/mule/os
+http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/ee/core
+http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+
+    <os:object-store name="Circuit_Breaker_OS"
+		persistent="true" />
+
+    <http-policy:proxy name="{{{policyId}}}-custom-policy">
+        <http-policy:source>
+
+            <logger level="INFO" message="Starting Custom Circuit Breaker Policy" />
+
+            <try>
+                <os:retrieve objectStore="Circuit_Breaker_OS" key="status" target="status">
+						<os:default-value ><![CDATA[#[null]]]></os:default-value>
+				</os:retrieve>
+                <error-handler>
+                    <on-error-continue 
+						logException="true" type="OS:KEY_NOT_FOUND">
+                        <logger level="INFO" message="Key Not Found Exception" />
+                        <ee:transform >
+								<ee:message>
+								</ee:message>
+								<ee:variables>
+									<ee:set-variable variableName="status"><![CDATA[%dw 2.0
+output application/json
+---
+{
+	state: "close",
+	errorCount: 0,
+	tripTime: null
+}]]></ee:set-variable>
+								</ee:variables>
+						</ee:transform>
+                        <os:store key="status" objectStore="Circuit_Breaker_OS">
+								<os:value ><![CDATA[#[vars.status]]]></os:value>
+						</os:store>
+                    </on-error-continue>
+                </error-handler>
+            </try>
+
+            <choice>
+                <when expression='#[vars.status.state == "open" and (now() as Number - vars.status.tripTime as Number) &gt; {{{openTimeout}}}]'>
+							<try>
+                            <logger level="INFO"  message="The system is in half-open state"/>
+                            <http-policy:execute-next/>
+							<choice>
+								<when expression='#[{{{errorCodes}}} contains attributes.statusCode]'>
+									<ee:transform >
+										<ee:message >
+										</ee:message>
+										<ee:variables >
+											<ee:set-variable variableName="cb_status" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	state: "open",
+	errorCount: vars.status.errorCount as Number,
+	tripTime: now() as Number
+}]]></ee:set-variable>
+										</ee:variables>
+									</ee:transform>
+									<logger level="INFO"  message="#[vars.cb_status]" />
+									<os:store key="status" objectStore="Circuit_Breaker_OS">
+										<os:value ><![CDATA[#[vars.cb_status]]]></os:value>
+									</os:store>
+								</when>
+
+								<otherwise>
+									<ee:transform >
+										<ee:message >
+										</ee:message>
+										<ee:variables >
+											<ee:set-variable variableName="cb_status" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	state: "close",
+	errorCount: 0,
+	tripTime: null
+}]]></ee:set-variable>
+										</ee:variables>
+									</ee:transform>
+									<logger level="INFO"  message="#[vars.cb_status]" />
+									<os:store key="status" objectStore="Circuit_Breaker_OS">
+										<os:value ><![CDATA[#[vars.cb_status]]]></os:value>
+									</os:store>
+								</otherwise>
+
+							</choice>
+                            </try>
+				</when>
+                <when expression='#[vars.status.state == "close" and vars.status.errorCount &lt; {{{threshold}}}]'>
+                   <try>
+                        <logger level="INFO"  message="The system is in close state"/>
+                            <http-policy:execute-next/>
+							<choice>
+								<when expression='#[{{{errorCodes}}} contains attributes.statusCode]'>
+									<ee:transform >
+										<ee:message >
+										</ee:message>
+										<ee:variables >
+											<ee:set-variable variableName="cb_status" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	state: "close",
+	errorCount: vars.status.errorCount as Number + 1,
+	tripTime: null
+}]]></ee:set-variable>
+										</ee:variables>
+									</ee:transform>
+									<logger level="INFO"  message="#[vars.cb_status]" />
+									<os:store key="status" objectStore="Circuit_Breaker_OS">
+										<os:value ><![CDATA[#[vars.cb_status]]]></os:value>
+									</os:store>
+								</when>
+
+								<otherwise>
+									<ee:transform >
+										<ee:message >
+										</ee:message>
+										<ee:variables >
+											<ee:set-variable variableName="cb_status" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	state: "close",
+	errorCount: 0,
+	tripTime: null
+}]]></ee:set-variable>
+										</ee:variables>
+									</ee:transform>
+									<logger level="INFO"  message="#[vars.cb_status]" />
+									<os:store key="status" objectStore="Circuit_Breaker_OS">
+										<os:value ><![CDATA[#[vars.cb_status]]]></os:value>
+									</os:store>
+								</otherwise>
+							</choice>
+                    </try> 
+                </when>
+                <when expression='#[vars.status.state == "close" and vars.status.errorCount &gt;= ({{{threshold}}} - 1)]'>
+                    <ee:transform >
+								<ee:message>
+									<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+"Service is temporarily unavailable. Please try again later."]]></ee:set-payload>
+								</ee:message>
+								<ee:variables >
+									<ee:set-variable variableName="cb_status" ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	state: "open",
+	errorCount: vars.status.errorCount as Number,
+	tripTime: now() as Number
+}]]></ee:set-variable>
+									<ee:set-variable variableName="http.status" ><![CDATA[503]]></ee:set-variable>
+								</ee:variables>
+					</ee:transform>
+					<logger level="INFO"  message="The system state is changed to open"/>
+					<logger level="INFO"  message="The system is in open state" />
+					<os:store key="status" objectStore="Circuit_Breaker_OS">
+						<os:value ><![CDATA[#[vars.cb_status]]]></os:value>
+					</os:store>
+                </when>
+                <otherwise>
+                    <ee:transform >
+								<ee:message >
+									<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+"Service is temporarily unavailable. Please try again later."]]></ee:set-payload>
+								</ee:message>
+								<ee:variables >
+									<ee:set-variable variableName="http.status" ><![CDATA[503]]></ee:set-variable>
+								</ee:variables>
+							</ee:transform>
+							<logger level="INFO"  message="#[vars.status]" />
+							<logger level="INFO"  message="The system is in open state" />
+							<os:store key="status" objectStore="Circuit_Breaker_OS">
+								<os:value ><![CDATA[#[vars.status]]]></os:value>
+							</os:store>
+                </otherwise>
+
+            </choice>
+            <logger level="INFO" message="Completed Custom Circuit Breaker Policy" />
+        </http-policy:source>
+    </http-policy:proxy>
+</mule>

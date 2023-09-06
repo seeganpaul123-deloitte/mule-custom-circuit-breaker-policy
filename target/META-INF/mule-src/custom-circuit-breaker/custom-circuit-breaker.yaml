@@ -1,0 +1,39 @@
+id: custom-circuit-breaker
+name: custom-circuit-breaker
+description: Custom circuit breaker
+category: Custom
+type: custom
+resourceLevelSupported: true
+encryptionSupported: false
+standalone: true
+requiredCharacteristics: []
+providedCharacteristics: []
+configuration: 
+
+- propertyName: threshold
+  name: Trip Threshold
+  description: Maximum number of errors allowed before the circuit is open.
+  type: int
+  minimumValue: 1 
+  maximumValue: 10
+  optional: false
+  sensitive: false
+  allowMultiple: false
+
+- propertyName: openTimeout
+  name: Open Timeout (seconds)
+  description: A time window for which a circuit remains open.
+  type: int
+  minimumValue: 1 
+  maximumValue: 120
+  optional: false
+  sensitive: false
+  allowMultiple: false
+
+- propertyName: errorCodes
+  name: Error Codes
+  description: A comma separated list of error codes for which the circuit breaker criteria is evaluated.
+  type: string
+  optional: false
+  sensitive: false
+  allowMultiple: false
